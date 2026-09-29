@@ -15,5 +15,5 @@ Source: OECD (2026) – with minor processing by Our World in Data
 # ETL_workflow
 ![Health Spending Chart](workflow.png)
 
-# Loading result
+# Load results
 ![Health Spending Chart](MyDB.png)
