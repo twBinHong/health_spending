@@ -1,7 +1,7 @@
 from datetime import timedelta, datetime
 from airflow.models import DAG
 from airflow.operators.python import PythonOperator
-# from airflow.utils.dates import days_ago
+from airflow.hooks.base import BaseHook
 
 import pandas as pd
 import requests
@@ -17,14 +17,14 @@ END_YEAR = 2025        # 最新年份
 # DAG arguments
 default_args = {
     'owner': 'BinHong',
-    'start_date': datetime(2026, 9, 1),
+    'start_date': datetime(2026,1,1),
     'email': ['youemail@example.com'],
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
 
 dag = DAG(
-    dag_id='ETL_health_spending_data',
+    dag_id='ETL_health_spending_data2',
     schedule=timedelta(days=1),
     default_args=default_args,
     description='Apache Airflow Final Assignment',
@@ -105,28 +105,28 @@ def transfer_dataset():
     merged.to_csv(f"{DIS}/Transformed_file.csv", index=False, encoding="utf-8-sig")  # utf-8-sig 讓 Excel 不亂碼
 
 def load_data():
-    try:
-        with open('mydatabase.txt', 'r', encoding='utf-8') as f:
-            mydb = json.load(f)
-    except Exception as e:
-        print(f"[錯誤] {type(e).__name__}: {e}")
-        return
+    print("Starting load data to MySQL...")
+        
+    # 1. 從 Airflow Connection 取得名稱為 'my_mysql_db' 的連線資訊
+    connection = BaseHook.get_connection('ubuntu_mysql_db')
     
-    url = URL.create(
-        "mysql+mysqlconnector",
-        username=mydb['user'],
-        password=mydb['password'],
-        host=mydb['host'],
-        database=mydb['database'])
-    engine = create_engine(url)
-
-    load_f = pd.read_csv("Transformed_file.csv")
+    # 2. 自動組合 SQLAlchemy 引擎 (含帳密、IP、Port、DB)
+    # 產出的 URI 格式類似: mysql+pymysql://user:pass@172.17.0.1:3306/dbname
+    engine = create_engine(connection.get_uri())
+    
+    # 3. 讀取前面步驟產生的 CSV 檔案
+    load_f = pd.read_csv(f'{DIS}/Transformed_file.csv')
+    
+    # 4. 寫入 MySQL 資料表 (table 名稱可自訂，if_exists='append' 代表附加寫入)
     try:
         load_f.to_sql('health_spending', engine, schema=None, if_exists='replace', index=True, index_label=False)
     except Exception as e:
         print(f"[錯誤] {type(e).__name__}: {e}")
     finally:
         engine.dispose() 
+    print("Data loaded to MySQL successfully!")
+    
+
 
 download_data = PythonOperator(
     task_id='download_dataset',
