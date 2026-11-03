@@ -3,6 +3,7 @@ from airflow.models import DAG
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable
 from airflow.sdk.bases.hook import BaseHook
+from airflow.providers.smtp.notifications.smtp import send_smtp_notification
 
 import pandas as pd
 import requests
@@ -18,7 +19,6 @@ END_YEAR = 2025        # 最新年份
 default_args = {
     'owner': 'BinHong',
     'start_date': datetime(2026,1,1),
-    'email': ['youemail@example.com'],
     'retries': 1,
     'retry_delay': timedelta(minutes=5),
 }
@@ -28,7 +28,16 @@ dag = DAG(
     schedule=timedelta(days=1),
     default_args=default_args,
     description='Apache Airflow Final Assignment',
+    on_failure_callback=[
+        send_smtp_notification(
+            from_email="airflow@example.com",
+            to="your_email@example.com",
+            subject="Airflow Alert: Task Failed",
+            html_content="The task {{ ti.task_id }} failed in DAG {{ dag.dag_id }}.",
+        )
+    ],
 )
+
 
 def transpose_one_entity(part: pd.DataFrame) -> pd.DataFrame:
     """將「單一 Entity」的資料轉置成 1 列：Entity, Code, 1985 ~ 2025。"""
