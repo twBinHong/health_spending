@@ -1,7 +1,8 @@
 from datetime import timedelta, datetime
 from airflow.models import DAG
-from airflow.operators.python import PythonOperator
-from airflow.hooks.base import BaseHook
+from airflow.providers.standard.operators.python import PythonOperator
+from airflow.sdk import Variable
+from airflow.sdk.bases.hook import BaseHook
 
 import pandas as pd
 import requests
@@ -10,7 +11,6 @@ import json
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 
-DIS="/opt/airflow/dags"
 START_YEAR = 2000      # 最早年份
 END_YEAR = 2025        # 最新年份
 
@@ -85,14 +85,15 @@ def download_dataset():
     url='https://ourworldindata.org/grapher/health-expenditure-and-financing-per-capita.csv?v=1&csvType=full&useColumnShortNames=false'
     with requests.get(url, stream=True) as response:
         response.raise_for_status()
-        target=f'{DIS}/health-expenditure-and-financing-per-capita.csv'
-        with open(target, 'wb') as file:
+        source_file = Variable.get("source_file_path")
+        with open(source_file, 'wb') as file:
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
-    print(f"File downloaded successfully: {target}")
+    print(f"File downloaded successfully: {source_file}")
 
 def transfer_dataset():
-    df = pd.read_csv(f'{DIS}/health-expenditure-and-financing-per-capita.csv')
+    source_file = Variable.get("source_file_path")
+    df = pd.read_csv(source_file)
     parts = split_each_entity(df)
     merged = transpose_and_merge(parts)
     
@@ -101,7 +102,8 @@ def transfer_dataset():
         raise ValueError("合併後列數與 Entity 數量不一致。")
     if merged.duplicated(subset=["Entity", "Code"]).any():
         raise ValueError("合併後有重複的 Entity/Code。")
-    
+
+    transformed_file = Variable.get("transformed_file_path")
     merged.to_csv(f"{DIS}/Transformed_file.csv", index=False, encoding="utf-8-sig")  # utf-8-sig 讓 Excel 不亂碼
 
 def load_data():
@@ -115,6 +117,7 @@ def load_data():
     engine = create_engine(connection.get_uri())
     
     # 3. 讀取前面步驟產生的 CSV 檔案
+    transformed_file = Variable.get("transformed_file_path")
     load_f = pd.read_csv(f'{DIS}/Transformed_file.csv')
     
     # 4. 寫入 MySQL 資料表 (table 名稱可自訂，if_exists='append' 代表附加寫入)
