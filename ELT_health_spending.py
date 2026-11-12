@@ -1,7 +1,7 @@
 from airflow import DAG
 from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
-from airflow.sdk import Variable
+from airflow.sdk import Variable, task
 from airflow.exceptions import AirflowException
 from pymongo.mongo_client import MongoClient
 from pymongo import UpdateOne
@@ -10,6 +10,10 @@ from datetime import datetime, timedelta
 import pandas as pd
 import requests
 
+@task(
+    retries=1,                              # 失敗時最多自動重試 1 次
+    retry_delay=timedelta(minutes=2),          # 每次重試間隔 2 分鐘)
+)
 def download_dataset():
     url='https://ourworldindata.org/grapher/health-expenditure-and-financing-per-capita.csv?v=1&csvType=full&useColumnShortNames=false'
     with requests.get(url, stream=True) as response:
@@ -20,12 +24,13 @@ def download_dataset():
             for chunk in response.iter_content(chunk_size=8192):
                 file.write(chunk)
     print(f"File downloaded successfully: {source_file}")
-
-def load_data_to_mongo_func():
-    # 使用 Variable.get("source_file_path") 取得 CSV 資料路徑
+    return source_file
     
-    file_path = Variable.get("source_file_path")
-    
+@task(
+    retries=2,                              # 失敗時最多自動重試 2 次
+    retry_delay=timedelta(minutes=2),          # 每次重試間隔 2 分鐘)
+)
+def load_data_to_mongo_func(file_path):
     print(f"[Load Data] 準備讀取 CSV 檔案路徑: {file_path}")
     
     try:
@@ -67,8 +72,7 @@ def load_data_to_mongo_func():
                 upsert=True
             )
         )
-        
-            
+                
     if bulk_operations:
         bulk_result = collection.bulk_write(bulk_operations)
         
@@ -77,8 +81,14 @@ def load_data_to_mongo_func():
         print(f"[Load Data 成功] 透過 bulk_write 批次完成！總共處理 {len(records)} 筆資料，實際新增/更新了 {total_affected} 筆至 MongoDB。")
     else:
         print("[Load Data] 沒有可寫入的資料。")
-
-def transform_to_excel_friendly_format_func():
+    
+    return "Load completed successfully"
+    
+@task(
+    retries=1,                              # 失敗時最多自動重試 1 次
+    retry_delay=timedelta(minutes=2),          # 每次重試間隔 2 分鐘)
+)
+def transform_to_excel_friendly_format_func(load_status):
     # 1. 使用 MongoHook 取得 MongoDB 連線
     client = MongoHook(mongo_conn_id="mongo_default").get_conn()
     db = client["testdb"]
@@ -136,23 +146,6 @@ with DAG(
 
 ) as dag:
 
-    download_data = PythonOperator(
-        task_id='download_dataset',
-        python_callable=download_dataset,
-        retries=1,
-        retry_delay=timedelta(minutes=2),
-    )
-    load_data_task = PythonOperator(
-        task_id="load_data",
-        python_callable=load_data_to_mongo_func,
-        retries=2,
-        retry_delay=timedelta(minutes=2),
-    )
-
-    transform_excel_task = PythonOperator(
-        task_id="transform_to_excel_ready",
-        python_callable=transform_to_excel_friendly_format_func,
-    )
-
-
-    download_data >> load_data_task >> transform_excel_task
+    filepath = download_dataset()
+    load_status = load_data_to_mongo_func(filepath)
+    transform_to_excel_friendly_format_func(load_status)
