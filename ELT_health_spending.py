@@ -3,6 +3,7 @@ from airflow.providers.mongo.hooks.mongo import MongoHook
 from airflow.providers.standard.operators.python import PythonOperator
 from airflow.sdk import Variable, task
 from airflow.exceptions import AirflowException
+from airflow.providers.smtp.notifications.smtp import send_smtp_notification
 from pymongo.mongo_client import MongoClient
 from pymongo import UpdateOne
 
@@ -143,7 +144,14 @@ with DAG(
     schedule=None,
     catchup=False,
     default_args={'owner': 'BinHong','retries': 1,'retry_delay': timedelta(minutes=5)},
-
+    on_failure_callback=[
+        send_smtp_notification(
+            from_email="airflow@example.com",
+            to="your_email@example.com",
+            subject="Airflow Alert: Task Failed",
+            html_content="The task {{ ti.task_id }} failed in DAG {{ dag.dag_id }}.",
+        )
+    ],
 ) as dag:
 
     filepath = download_dataset()
